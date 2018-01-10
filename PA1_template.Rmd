@@ -1,25 +1,206 @@
 ---
 title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
+author: "FVB"
+date: "29 de diciembre de 2017"
+output: html_document
 ---
-
-
 ## Loading and preprocessing the data
 
+The first thing that we do is, in order to be reproducible, coding the process
+of downloading the data and also the required packages for the script to work.
 
+Note: In order to make the reading clear, information or warning messages are turned off.
+
+```{r processing, echo=TRUE, message=FALSE,warning=FALSE}
+
+if (!("dplyr" %in% installed.packages()[,1])) {install.packages("dplyr")}
+if (!("ggplot2" %in% installed.packages()[,1])) {install.packages("ggplot2")}
+library(dplyr)
+library(ggplot2)
+
+
+download.file(url = "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip",
+              destfile = "./monitordata.zip")
+unzip(zipfile = "monitordata.zip")
+monitordata<-read.csv(file = "./activity.csv",col.names = c("steps","date","interval"))
+
+monitordata$interval[1:15]
+```
+
+
+
+You can check that the way the interval its registered is unnatural since 
+every hour it restarts a 0-55 count and adds 100 to its value. We correct this
+so we get intervals that look more natural: the accumulation of
+consecutive increases of 5 min, from 0 (=00:00) to 1435 (23:55).
+
+In order to do this what we do its an arithmetical operation in which we substract
+40 from the number it has for every multiple of 100 that its value contains.
+
+```{r intercorrect, echo=TRUE}
+monitordata$interval <-monitordata$interval-(40*trunc(monitordata$interval/100))
+
+monitordata$interval[1:15]
+```
+
+With this the data set is already ready for working with it.
 
 ## What is mean total number of steps taken per day?
 
+For answering this we group our data by day and we summarise our results in a table
+where we calculate the total number of steps done, mean and median for each day. 
+In this step we remove NA values for our calculations.
+```{r daygrouping, echo=TRUE,warning=FALSE}
+monitdat.day<-group_by(.data = monitordata,date)
+steps.summ.d<-summarise(monitdat.day, steps.tot=sum(steps,na.rm = TRUE),
+   steps.mean=mean(steps,na.rm = TRUE),steps.median= median(steps,na.rm = TRUE))
+print(steps.summ.d)
+```
+Then we get a histogram of the total number of steps done each day.
+
+To make our histogram have a more easy to understand format, we choose the
+breaks for separate the different columns of our histogram to correspond approximately with 
+the equivalent of a km (around 1300 steps according to a Google search).
+```{r histogramday, echo=TRUE}
+hist(steps.summ.d$steps.tot,breaks = seq(0,21194,21194/17), 
+  main = "Histogram of the total number of steps taken each day",
+  ylab = "Number of days",xlab = "Total steps (each division aprox 1km)")
+```
 
 
 ## What is the average daily activity pattern?
 
+ For this we group our data by their interval values and we make an activity 
+ time line, averaged across all days.
+```{r intervalgrouping, echo=TRUE}
+monitdat.inter<-group_by(.data = monitordata,interval)
+steps.summ.inter<-summarise(monitdat.inter, steps.tot=sum(steps,na.rm = TRUE),
+   steps.mean=mean(steps,na.rm = TRUE),steps.median= median(steps,na.rm = TRUE))
+print(steps.summ.inter)
+```
+Again to give a much easily understandable approach to our data we plot our data
+against the time in hours and not in minutes.
+```{r plotinterval, echo=TRUE}
+plot(x = steps.summ.inter$interval/60, y=steps.summ.inter$steps.mean,type = "l",
+    xlab = "Time (h)", ylab = "Average Number of Steps",
+    main = "Daily Evolution of the Average Number of Steps",xaxp=c(0,24,12))
+max.inter.val<-steps.summ.inter$interval[steps.summ.inter$steps.mean==max(steps.summ.inter$steps.mean)]
+```
 
+We calculate the maximal interval according to the averaged number of steps value across all days :`r max.inter.val` minutes / `r max.inter.val/60` hours.
 
 ## Imputing missing values
 
+```{r nalocate,echo=TRUE}
+total.na<-sum(is.na(monitordata$steps))
+print(total.na)
+na.pos<-which(is.na(monitordata$steps))
+unique(as.Date(monitordata$date)[na.pos])
+na.pos.s<-which(steps.summ.d$steps.tot==0)
+steps.summ.d$date[na.pos.s]
+```
+
+We have seem so far that many missing values (NA) were present in our data (`r total.na`),
+when we check if their presence follows some pattern we could see that they 
+correspond to eight specific whole days and so we can not use the daily average as a
+way to substitute them instead we will use the interval average.
+
+Once we got the positions we substitute the NA by their corresponding average 
+interval values
+```{r nasubstitute,echo=TRUE}
+monitdat.rev<-monitordata
+
+for( i in na.pos){
+        monitdat.rev$steps[i]<-steps.summ.inter$steps.mean[steps.summ.inter$interval == monitordata$interval[i]]
+}
+```
+With the new values we follow an identical process to address the previous 
+first question, and we compare the two histograms to see their differences.
+```{r histocomp,echo=TRUE}
+monitdat.day.rev<-group_by(.data = monitdat.rev,date)
+steps.summ.d.rev<-summarise(monitdat.day.rev, steps.tot=sum(steps,na.rm = TRUE),
+   steps.mean=mean(steps,na.rm = TRUE),steps.median= median(steps,na.rm = TRUE))
+
+hist(steps.summ.d$steps.tot,breaks = seq(0,21194,21194/17), 
+  main = "Histogram of the total number of steps taken each day",
+  ylab = "Number of days",xlab = "Total steps (each division approx 1km)",
+  ylim = c(0,20), col=rgb(1,0,0,0.5))
+
+hist(steps.summ.d.rev$steps.tot,breaks = seq(0,21194,21194/17), 
+     col=rgb(0,1,0,0.5),add=TRUE)
+
+legend("topright", legend = c("Without NA Filling","With NA Filling"),
+       lty= c(1,1),lwd = 6, col = c(rgb(1,0,0,0.5),rgb(0,1,0,0.5)))
+```
+
+As long as all the days didn't have measurements and they have undergone the
+same modifications, the changes in their averages and medians are the same:
+```{r tablesum, echo=TRUE}
+print(steps.summ.d[na.pos.s,])
+print(steps.summ.d.rev[na.pos.s,])
+```
+
+Obviously the values differ from the ones without NA correction.It produces an
+efective displacement of the mean value of the total number of steps around 9-10
+km (10.000-11.250 steps). 
+
+Even if this tendency was already partially perceived by the unaffected days (dark green):
+our correction displaces its center from a broarder range of 10k-12.5k steps. 
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+ For review the second question again we decide to group the new values 
+ according to another parameter: if their day belongs to the weekday or the weekend.
+ For this we add a new factor column to our data and then group our data by the 
+ kind of day they belong to and their intervals. After that we calculate their 
+ new means and medians, averaged now only among their kind of day.
+ 
+ Note: We set the language of the system to english to make our code work properly
+
+```{r daykind, echo=TRUE}
+Sys.setlocale("LC_TIME", locale = "C")
+monitdat.rev$day.kind <- factor(ifelse(weekdays(as.Date(monitdat.rev$date))==
+  "Saturday"|weekdays(as.Date(monitordata$date))=="Sunday","weekend","weekday"))
+
+monitdat.inter<-group_by(.data = monitordata,interval)
+monitdat.rev.kind.inter<-group_by(.data = monitdat.rev,day.kind,interval)
+
+steps.summ.inter.rev<-summarise(monitdat.rev.kind.inter, 
+steps.tot=sum(steps,na.rm = TRUE),steps.mean=mean(steps,na.rm = TRUE),
+steps.median= median(steps,na.rm = TRUE))
+head(steps.summ.inter.rev)
+```
+
+We plot the daily evolution for the two kind of days.
+```{r plotevorev, echo=TRUE, fig.height=7,fig.width=11}
+ggplot(data = steps.summ.inter.rev,aes(x=interval/60,y=steps.mean, colour=day.kind))+
+geom_line()+facet_grid(day.kind~.)+
+labs(title="Daily Evolution of the Average Number of Steps",x="Time(h)",y="Average Number of Steps")+
+theme(plot.title = element_text(hjust = 0.5))+
+scale_x_continuous(breaks = seq.int(0,24,2),limits = c(0,24))
+```
+
+We can see several differences:
+
+- On weekdays the movement starts and finishes, on average, earlier than on weekends
+(starts around 6/8 and finishes around 20/21).
+Surely this is related mainly to working schedules that are absent on weekends.
+
+- On average the amount of steps done afetr the commuting to work range (9:30 a.m on)
+is bigger on weekends: this is probably due to the absence of space restriction
+given by an office work, and so probably people go shopping, having lunch outside,
+hiking, etc, in general activities that require movement.
+
+- Finally in both cases theres a similar increase of movement between 8-9:30 a.m. 
+It's not clear the reason behind this.
+
+
+We might be suspicious if their differences only come due to our method for 
+substitution, but if we check the days with NA presence we can see they are 
+present in both types of day.
+
+```{r daycheck,echo=TRUE}
+na.days <- list (unique(as.Date(monitdat.rev$date)[na.pos]),unique(weekdays(as.Date(monitdat.rev$date))[na.pos]))
+print(na.days)
+```
